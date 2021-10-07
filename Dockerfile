@@ -1,4 +1,5 @@
 FROM golang:1.16-bullseye
+LABEL org.opencontainers.image.source = "https://github.com/skobaken7/docker-hosts";
 
 WORKDIR /app
 
