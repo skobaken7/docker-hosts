@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
+	"runtime/pprof"
 
 	"github.com/cockroachdb/errors"
 	"github.com/docker/docker/api/types"
@@ -24,35 +26,34 @@ func run() error {
 
 	listners := newListeners(dockerClient)
 
-	wait := make(chan error)
-	go (func() {
-		log.Println("Listening")
+	f, _ := os.Create("cpu.pprof")
+	pprof.StartCPUProfile(f)
 
-		events, errs := dockerClient.Events(context.Background(), types.EventsOptions{})
-		for {
-			select {
-			case event := <-events:
-				err := listners.receive(event)
-				if err != nil {
-					log.Printf("listner returns error: %+v\n", err)
-				}
-
-			case err := <-errs:
-				wait <- err
-				return
-
-			default:
-			}
-		}
-	})()
+	ctx, cancel := context.WithCancel(context.Background())
+	events, errs := dockerClient.Events(ctx, types.EventsOptions{})
+	defer cancel()
 
 	if err := listners.init(); err != nil {
 		log.Printf("listners.init returns error: %+v\n", err)
+		return err
 	}
 
-	if err := <-wait; err != io.EOF {
-		log.Printf("events stream catch the error: %+v\n", err)
-	}
+	log.Println("Listening")
 
-	return nil
+	for {
+		select {
+		case event := <-events:
+			err := listners.receive(event)
+			if err != nil {
+				log.Printf("listner returns error: %+v\n", err)
+			}
+
+		case err := <-errs:
+			if err == io.EOF {
+				return nil
+			}
+			log.Printf("docker client receives error: %+v\n", err)
+			return err
+		}
+	}
 }
